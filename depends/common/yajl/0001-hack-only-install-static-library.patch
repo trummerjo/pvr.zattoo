@@ -1,0 +1,48 @@
+From 9937fbf4dbbb5fab713acc8172a3ff759c134e74 Mon Sep 17 00:00:00 2001
+From: Arne Morten Kvarving <arne.morten.kvarving@sintef.no>
+Date: Fri, 25 Nov 2016 16:07:01 +0100
+Subject: [PATCH] hack: only install static library
+
+---
+ src/CMakeLists.txt | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 99cf9e9..e59a131 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -35,9 +35,9 @@ SET (shareDir ${CMAKE_CURRENT_BINARY_DIR}/../${YAJL_DIST_NAME}/share/pkgconfig)
+ # set the output path for libraries
+ SET(LIBRARY_OUTPUT_PATH ${libDir})
+ 
+-ADD_LIBRARY(yajl_s STATIC ${SRCS} ${HDRS} ${PUB_HDRS})
++ADD_LIBRARY(yajl STATIC ${SRCS} ${HDRS} ${PUB_HDRS})
+ 
+-ADD_LIBRARY(yajl SHARED ${SRCS} ${HDRS} ${PUB_HDRS})
++#ADD_LIBRARY(yajl SHARED ${SRCS} ${HDRS} ${PUB_HDRS})
+ 
+ #### setup shared library version number
+ SET_TARGET_PROPERTIES(yajl PROPERTIES
+@@ -69,8 +69,8 @@ FOREACH (header ${PUB_HDRS})
+ 
+   EXEC_PROGRAM(${CMAKE_COMMAND} ARGS -E copy_if_different ${header} ${incDir})
+ 
+-  ADD_CUSTOM_COMMAND(TARGET yajl_s POST_BUILD
+-      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${header} ${incDir})
++  #  ADD_CUSTOM_COMMAND(TARGET yajl_s POST_BUILD
++  #   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${header} ${incDir})
+ ENDFOREACH (header ${PUB_HDRS})
+ 
+ INCLUDE_DIRECTORIES(${incDir}/..)
+@@ -81,7 +81,7 @@ INSTALL(TARGETS yajl
+         RUNTIME DESTINATION lib${LIB_SUFFIX}
+         LIBRARY DESTINATION lib${LIB_SUFFIX}
+         ARCHIVE DESTINATION lib${LIB_SUFFIX})
+-INSTALL(TARGETS yajl_s ARCHIVE DESTINATION lib${LIB_SUFFIX})
++#INSTALL(TARGETS yajl_s ARCHIVE DESTINATION lib${LIB_SUFFIX})
+ INSTALL(FILES ${PUB_HDRS} DESTINATION include/yajl)
+ INSTALL(FILES ${incDir}/yajl_version.h DESTINATION include/yajl)
+ INSTALL(FILES ${shareDir}/yajl.pc DESTINATION share/pkgconfig)
+-- 
+2.8.1
+
