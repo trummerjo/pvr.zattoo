@@ -8,6 +8,21 @@
     point="xbmc.pvrclient"
     library_@PLATFORM@="@LIBRARY_FILENAME@"/>
   <extension point="xbmc.addon.metadata">
+    <summary lang="en_AU">PVR-client addon for Zattoo Internet TV support for Kodi. https://github.com/trummerjo/pvr.zattoo</summary>
+    <summary lang="en_GB">PVR-client addon for Zattoo Internet TV support for Kodi. https://github.com/trummerjo/pvr.zattoo</summary>
+    <summary lang="en_NZ">PVR-client addon for Zattoo Internet TV support for Kodi. https://github.com/trummerjo/pvr.zattoo</summary>
+    <summary lang="en_US">PVR-client addon for Zattoo Internet TV support for Kodi. https://github.com/trummerjo/pvr.zattoo</summary>
+    <summary lang="sv_SE">PVR-tillägg med Zattoo Internet-TV support för Kodi. https://github.com/trummerjo/pvr.zattoo</summary>
+    <description lang="en_AU">Zattoo PVR Client supports Zattoo Internet TV as streaming Live TV source.</description>
+    <description lang="en_GB">Zattoo PVR Client supports Zattoo Internet TV as streaming Live TV source.</description>
+    <description lang="en_NZ">Zattoo PVR Client supports Zattoo Internet TV as streaming Live TV source.</description>
+    <description lang="en_US">Zattoo PVR Client supports Zattoo Internet TV as streaming Live TV source.</description>
+    <description lang="sv_SE">Zattoo PVR Client stöder Zattoo Internet TV som streaming Live TV källa.</description>
+    <disclaimer lang="en_AU">This is unstable software! The authors are in no way responsible for failed playings, incorrect EPG times, wasted hours, or any other undesirable effects.</disclaimer>
+    <disclaimer lang="en_GB">This is unstable software! The authors are in no way responsible for failed playings, incorrect EPG times, wasted hours, or any other undesirable effects.</disclaimer>
+    <disclaimer lang="en_NZ">This is unstable software! The authors are in no way responsible for failed playings, incorrect EPG times, wasted hours, or any other undesirable effects.</disclaimer>
+    <disclaimer lang="en_US">This is unstable software! The authors are in no way responsible for failed playings, incorrect EPG times, wasted hours, or any other undesirable effects.</disclaimer>
+    <disclaimer lang="sv_SE">Denna mjukvara är ostabil! Författarna kan inte på något sätt hållas ansvariga för felaktiga uppspelningar, EPG-tider, bortslösade timmar eller andra oönskade effekter.</disclaimer>
     <platform>@PLATFORM@</platform>
   </extension>
 </addon>
