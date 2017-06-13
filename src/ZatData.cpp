@@ -1,7 +1,6 @@
 #include <iostream>
 #include <string>
 #include "ZatData.h"
-#include "HTTPSocket.h"
 #include "yajl/yajl_tree.h"
 #include "yajl/yajl_gen.h"
 #include <sstream>
@@ -10,6 +9,7 @@
 #include <map>
 #include <time.h>
 #include <random>
+#include "Utils.h"
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32) && !defined(__CYGWIN__)
  #pragma comment(lib, "ws2_32.lib")
@@ -35,79 +35,28 @@ using namespace ADDON;
 using namespace std;
 
 static const string data_file = "special://profile/addon_data/pvr.zattoo/data.json";
-
-static const char *to_base64 =
-"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-abcdefghijklmnopqrstuvwxyz\
-0123456789+/";
-
-std::string ZatData::Base64Encode(unsigned char const* in, unsigned int in_len, bool urlEncode)
-{
-  std::string ret;
-  int i(3);
-  unsigned char c_3[3];
-  unsigned char c_4[4];
-
-  while (in_len) {
-    i = in_len > 2 ? 3 : in_len;
-    in_len -= i;
-    c_3[0] = *(in++);
-    c_3[1] = i > 1 ? *(in++) : 0;
-    c_3[2] = i > 2 ? *(in++) : 0;
-
-    c_4[0] = (c_3[0] & 0xfc) >> 2;
-    c_4[1] = ((c_3[0] & 0x03) << 4) + ((c_3[1] & 0xf0) >> 4);
-    c_4[2] = ((c_3[1] & 0x0f) << 2) + ((c_3[2] & 0xc0) >> 6);
-    c_4[3] = c_3[2] & 0x3f;
-
-    for (int j = 0; (j < i + 1); ++j)
-    {
-      if (urlEncode && to_base64[c_4[j]] == '+')
-        ret += "%2B";
-      else if (urlEncode && to_base64[c_4[j]] == '/')
-        ret += "%2F";
-      else
-        ret += to_base64[c_4[j]];
-    }
-  }
-  while ((i++ < 3))
-    ret += urlEncode ? "%3D" : "=";
-  return ret;
-}
+static const string zattooServer = "https://zattoo.com";
 
 string ZatData::HttpGet(string url, bool isInit) {
   return HttpPost(url, "", isInit);
 }
 
 string ZatData::HttpPost(string url, string postData, bool isInit) {
-  HTTPSocketRaw *socket = new HTTPSocketRaw();
-  Request request;
+  int statusCode;
   XBMC->Log(LOG_DEBUG, "Http-Request: %s.", url.c_str());
-  request.url = url;
-  if (!postData.empty()) {
-    request.method = POST;
-    request.body = postData;
-  }
-  request.AddHeader("Cookie", cookie);
-  Response response;
-  if (!socket->Execute(request, response)) {
-    XBMC->Log(LOG_DEBUG, "Http request failed");
-    return "";
-  }
-  if (response.statusCode == "403" && !isInit) {
-    XBMC->Log(LOG_DEBUG, "Open URL failed. Try to re-init session.");
+  string content = curl->Post(url, postData, statusCode);
+  
+  if (statusCode == 403 && !isInit) {
+    delete curl;
+    curl = new Curl();
+    XBMC->Log(LOG_ERROR, "Open URL failed. Try to re-init session.");
     if (!initSession()) {
       XBMC->Log(LOG_ERROR, "Re-init of session. Failed.");
       return "";
     }
-    socket->Execute(request, response);
+    return curl->Post(url, postData, statusCode);
   }
-  if (response.statusCode != "200") {
-    XBMC->Log(LOG_ERROR, "HTTP failed with status code %s.", response.statusCode.c_str());
-    return "";
-  }
-  cookie = response.cookie;
-  return response.body;
+  return content;
 }
 
 bool ZatData::readDataJson() {
@@ -229,7 +178,8 @@ string ZatData::generateUUID() {
 }
 
 bool ZatData::loadAppId() {
-  string html = HttpGet("http://zattoo.com", true);
+  string html = HttpGet(zattooServer, true);
+
   appToken = "";
   //There seems to be a problem with old gcc and osx with regex. Do it the dirty way:
   int basePos = html.find("window.appToken = '") + 19;
@@ -243,7 +193,7 @@ bool ZatData::loadAppId() {
     return false;
   }
 
-  XBMC->Log(LOG_DEBUG, "Loaded App token %s", XBMC->UnknownToUTF8(appToken.c_str()));
+  XBMC->Log(LOG_DEBUG, "Loaded App token %s", appToken.c_str());
   return true;
 
 }
@@ -253,7 +203,7 @@ bool ZatData::sendHello(string uuid) {
   ostringstream dataStream;
   dataStream << "uuid=" << uuid << "&lang=en&format=json&client_app_token=" << appToken;
 
-  string jsonString = HttpPost("http://zattoo.com/zapi/session/hello", dataStream.str(), true);
+  string jsonString = HttpPost(zattooServer + "/zapi/session/hello", dataStream.str(), true);
 
   yajl_val json = JsonParser::parse(jsonString);
 
@@ -272,8 +222,8 @@ bool ZatData::login() {
   XBMC->Log(LOG_DEBUG, "Try to login.");
 
   ostringstream dataStream;
-  dataStream << "login=" << username << "&password=" << password << "&format=json";
-  string jsonString = HttpPost("http://zattoo.com/zapi/account/login", dataStream.str(), true);
+  dataStream << "login=" << Utils::UrlEncode(username) << "&password=" << Utils::UrlEncode(password) << "&format=json";
+  string jsonString = HttpPost(zattooServer + "/zapi/account/login", dataStream.str(), true);
 
   yajl_val json = JsonParser::parse(jsonString);
 
@@ -289,8 +239,7 @@ bool ZatData::login() {
 }
 
 bool ZatData::initSession() {
-  getUUID();
-  string jsonString = HttpGet("http://zattoo.com/zapi/v2/session", true);
+  string jsonString = HttpGet(zattooServer + "/zapi/v2/session", true);
   yajl_val json = JsonParser::parse(jsonString);
   if(json == NULL || !JsonParser::getBoolean(json, 1, "success")) {
     yajl_tree_free(json);
@@ -313,7 +262,7 @@ bool ZatData::initSession() {
     if (!login()) {
       return false;
     }
-    jsonString = HttpGet("http://zattoo.com/zapi/v2/session", true);
+    jsonString = HttpGet(zattooServer + "/zapi/v2/session", true);
     json = JsonParser::parse(jsonString);
     if (json == NULL || !JsonParser::getBoolean(json, 1, "success") || !JsonParser::getBoolean(json, 2, "session" , "loggedin")) {
       yajl_tree_free(json);
@@ -322,6 +271,7 @@ bool ZatData::initSession() {
     }
   }
 
+  countryCode = JsonParser::getString(json, 2, "session" , "aliased_country_code");
   recallEnabled = streamType == "dash" && JsonParser::getBoolean(json, 2, "session" , "recall_eligible");
   recordingEnabled = JsonParser::getBoolean(json, 2, "session" , "recording_eligible");
   if (recallEnabled) {
@@ -338,7 +288,7 @@ bool ZatData::initSession() {
 
 yajl_val ZatData::loadFavourites() {
 
-    string jsonString = HttpGet("http://zattoo.com/zapi/channels/favorites");
+    string jsonString = HttpGet(zattooServer + "/zapi/channels/favorites");
     yajl_val json = JsonParser::parse(jsonString);
     
     if (json == NULL || !JsonParser::getBoolean(json, 1, "success")){
@@ -361,7 +311,7 @@ bool ZatData::LoadChannels() {
     yajl_val favs = JsonParser::getArray(favsJson, 1, "favorites");
 
     ostringstream urlStream;
-    urlStream << "http://zattoo.com/zapi/v2/cached/channels/" << powerHash << "?details=False";
+    urlStream << zattooServer + "/zapi/v2/cached/channels/" << powerHash << "?details=False";
     string jsonString = HttpGet(urlStream.str());
 
     yajl_val json = JsonParser::parse(jsonString);
@@ -447,15 +397,18 @@ int ZatData::GetChannelGroupsAmount() {
     return channelGroups.size();
 }
 
-ZatData::ZatData(std::string u, std::string p, bool favoritesOnly) :
+ZatData::ZatData(std::string u, std::string p, bool favoritesOnly, bool alternativeEpgService) :
   maxRecallSeconds(0),
   recallEnabled(false),
+  countryCode(""),
   recordingEnabled(false),
   updateThread(NULL),
   uuid("")
 {
+  curl = new Curl();
   username = u;
   password = p;
+  this->alternativeEpgService = alternativeEpgService;
   this->favoritesOnly = favoritesOnly;
   m_iLastStart = 0;
   m_iLastEnd = 0;
@@ -467,7 +420,11 @@ ZatData::~ZatData() {
     updateThread->StopThread(1000);
     delete updateThread;
   }
+  for (auto const& item : recordingsData) {
+    delete item.second;
+  }
   channelGroups.clear();
+  delete curl;
 }
 
 bool ZatData::Initialize() {
@@ -489,10 +446,6 @@ bool ZatData::Initialize() {
 void ZatData::GetAddonCapabilities(PVR_ADDON_CAPABILITIES* pCapabilities) {
   pCapabilities->bSupportsRecordings      = recordingEnabled;
   pCapabilities->bSupportsTimers          = recordingEnabled;
-}
-
-void *ZatData::Process(void) {
-    return NULL;
 }
 
 PVR_ERROR ZatData::GetChannelGroups(ADDON_HANDLE handle) {
@@ -605,7 +558,7 @@ std::string ZatData::GetChannelStreamUrl(int uniqueId) {
     ostringstream dataStream;
     dataStream << "cid=" << channel->cid << "&stream_type=" << streamType << "&format=json";
 
-    string jsonString = HttpPost("http://zattoo.com/zapi/watch", dataStream.str());
+    string jsonString = HttpPost(zattooServer + "/zapi/watch", dataStream.str());
 
     yajl_val json = JsonParser::parse(jsonString);
     if (json == NULL || !JsonParser::getBoolean(json, 1, "success")){
@@ -641,7 +594,81 @@ int ZatData::findChannelNumber(int uniqueId) {
     return 0;
 }
 
+PVR_ERROR ZatData::GetEPGForChannelExternalService(ADDON_HANDLE handle, const PVR_CHANNEL &channel, time_t iStart, time_t iEnd) {
+  ZatChannel *zatChannel = FindChannel(channel.iUniqueId);
+  string cid = zatChannel->cid;
+  ostringstream urlStream;
+  urlStream << "http://zattoo.buehlmann.net/epg/api/Epg/" << countryCode << "/"
+            << powerHash << "/" << cid << "/" << iStart << "/" << iEnd;
+  string jsonString = HttpGet(urlStream.str());
+  yajl_val json = JsonParser::parse(jsonString);
+  if (json == NULL){
+    yajl_tree_free(json);
+    return PVR_ERROR_SERVER_ERROR;
+  }
+
+  for (int i = 0; i < json->u.array.len; ++i) {
+    yajl_val program = json->u.array.values[i];
+    EPG_TAG tag;
+    memset(&tag, 0, sizeof(EPG_TAG));
+
+    tag.iUniqueBroadcastId  = JsonParser::getInt(program, 1, "Id");
+    string title = JsonParser::getString(program, 1, "Title");
+    tag.strTitle            = title.c_str();
+    tag.iChannelNumber      = zatChannel->iChannelNumber;
+    tag.startTime           = JsonParser::getTime(program, 1, "StartTime");
+    tag.endTime             = JsonParser::getTime(program, 1, "EndTime");
+    string description = JsonParser::getString(program, 1, "Description");
+    tag.strPlotOutline      = description.c_str();
+    tag.strPlot             = description.c_str();
+    tag.strOriginalTitle    = NULL;  /* not supported */
+    tag.strCast             = NULL;  /* not supported */
+    tag.strDirector         = NULL;  /*SA not supported */
+    tag.strWriter           = NULL;  /* not supported */
+    tag.iYear               = 0;     /* not supported */
+    tag.strIMDBNumber       = NULL;  /* not supported */
+    string imageUrl = JsonParser::getString(program, 1, "ImageUrl");
+    tag.strIconPath         = imageUrl.c_str();
+    tag.iParentalRating     = 0;     /* not supported */
+    tag.iStarRating         = 0;     /* not supported */
+    tag.bNotify             = false; /* not supported */
+    tag.iSeriesNumber       = 0;     /* not supported */
+    tag.iEpisodeNumber      = 0;     /* not supported */
+    tag.iEpisodePartNumber  = 0;     /* not supported */
+    string subTitle = JsonParser::getString(program, 1, "Subtitle");
+    tag.strEpisodeName      = subTitle.c_str();  /* not supported */
+    tag.iFlags              = EPG_TAG_FLAG_UNDEFINED;
+
+    string genreStr = JsonParser::getString(program, 1, "Genre");
+    int genre = categories.Category(genreStr.c_str());
+    if (genre) {
+      tag.iGenreSubType = genre&0x0F;
+      tag.iGenreType = genre&0xF0;
+    } else {
+      tag.iGenreType          = EPG_GENRE_USE_STRING;
+      tag.iGenreSubType       = 0;     /* not supported */
+      tag.strGenreDescription = genreStr.c_str();
+    }
+
+    PVR->TransferEpgEntry(handle, &tag);
+  }
+
+  yajl_tree_free(json);
+
+  return PVR_ERROR_NO_ERROR;
+}
+
+string ZatData::timeToIsoString(time_t t) {
+  char buf[sizeof "2011-10-08T07:07:09Z"];
+  strftime(buf, sizeof buf, "%FT%TZ", gmtime(&t));
+  return buf;
+}
+
 PVR_ERROR ZatData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &channel, time_t iStart, time_t iEnd) {
+
+  if (this->alternativeEpgService) {
+    return GetEPGForChannelExternalService(handle, channel, iStart, iEnd);
+  }
 
     ZatChannel *zatChannel = FindChannel(channel.iUniqueId);
 
@@ -658,11 +685,14 @@ PVR_ERROR ZatData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &chan
         }
     }
 
-
-    std::vector<PVRIptvEpgEntry>::iterator it;
-    for (it = zatChannel->epg.begin(); it != zatChannel->epg.end(); ++it)
+    std::map<time_t, PVRIptvEpgEntry>* channelEpgCache = epgCache[zatChannel->cid];
+    if (channelEpgCache == NULL) {
+        return PVR_ERROR_NO_ERROR;
+    }
+    epgCache.erase(zatChannel->cid);
+    for (auto const &entry : *channelEpgCache)
     {
-        PVRIptvEpgEntry &epgEntry = (*it);
+        PVRIptvEpgEntry epgEntry = entry.second;
 
         EPG_TAG tag;
         memset(&tag, 0, sizeof(EPG_TAG));
@@ -681,18 +711,6 @@ PVR_ERROR ZatData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &chan
         tag.iYear               = 0;     /* not supported */
         tag.strIMDBNumber       = NULL;  /* not supported */
         tag.strIconPath         = epgEntry.strIconPath.c_str();
-//        if (FindEpgGenre(myTag->strGenreString, iGenreType, iGenreSubType))
-//        {
-//            tag.iGenreType          = iGenreType;
-//            tag.iGenreSubType       = iGenreSubType;
-//            tag.strGenreDescription = NULL;
-//        }
-//        else
-//        {
-            tag.iGenreType          = EPG_GENRE_USE_STRING;
-            tag.iGenreSubType       = 0;     /* not supported */
-            tag.strGenreDescription = epgEntry.strGenreString.c_str();
-//        }
         tag.iParentalRating     = 0;     /* not supported */
         tag.iStarRating         = 0;     /* not supported */
         tag.bNotify             = false; /* not supported */
@@ -702,10 +720,19 @@ PVR_ERROR ZatData::GetEPGForChannel(ADDON_HANDLE handle, const PVR_CHANNEL &chan
         tag.strEpisodeName      = NULL;  /* not supported */
         tag.iFlags              = EPG_TAG_FLAG_UNDEFINED;
 
+        int genre = categories.Category(epgEntry.strGenreString.c_str());
+        if (genre) {
+          tag.iGenreSubType = genre&0x0F;
+          tag.iGenreType = genre&0xF0;
+        } else {
+          tag.iGenreType          = EPG_GENRE_USE_STRING;
+          tag.iGenreSubType       = 0;     /* not supported */
+          tag.strGenreDescription = epgEntry.strGenreString.c_str();
+        }
+
         PVR->TransferEpgEntry(handle, &tag);
-
     }
-
+    delete channelEpgCache;
 
     return PVR_ERROR_NO_ERROR;
 }
@@ -724,7 +751,7 @@ bool ZatData::LoadEPG(time_t iStart, time_t iEnd) {
 
     while(tempEnd <= iEnd) {
         ostringstream urlStream;
-        urlStream << "http://zattoo.com/zapi/v2/cached/program/power_guide/" << powerHash << "?end=" << tempEnd << "&start=" << tempStart << "&format=json";
+        urlStream << zattooServer + "/zapi/v2/cached/program/power_guide/" << powerHash << "?end=" << tempEnd << "&start=" << tempStart << "&format=json";
 
         string jsonString = HttpGet(urlStream.str());
 
@@ -741,15 +768,17 @@ bool ZatData::LoadEPG(time_t iStart, time_t iEnd) {
         for ( int index = 0; index < channels->u.array.len; ++index ) {
             yajl_val channelItem = channels->u.array.values[index];
             string cid = JsonParser::getString(channelItem, 1, "cid");
+
+            int channelId = GetChannelId(cid.c_str());
+            ZatChannel *channel = FindChannel(channelId);
+
+            if (!channel) {
+              continue;
+            }
+
             yajl_val programs = JsonParser::getArray(channelItem, 1, "programs");
             for (int i = 0; i < programs->u.array.len; ++i) {
                 yajl_val program = programs->u.array.values[i];
-                int channelId = GetChannelId(cid.c_str());
-                ZatChannel *channel = FindChannel(channelId);
-
-                if (!channel) {
-                    continue;
-                }
 
                 PVRIptvEpgEntry entry;
                 entry.strTitle = JsonParser::getString(program, 1, "t");
@@ -761,15 +790,15 @@ bool ZatData::LoadEPG(time_t iStart, time_t iEnd) {
                 entry.strPlot = JsonParser::getString(program, 1, "et");
 
                 yajl_val genres = JsonParser::getArray(program, 1, "g");
-                ostringstream generesStream;
                 for (int genre = 0; genre < genres->u.array.len; genre++) {
-                    string genereName = YAJL_GET_STRING(genres->u.array.values[genre]);
-                    generesStream << genereName << " ";
+                    entry.strGenreString = YAJL_GET_STRING(genres->u.array.values[genre]);
+                    break;
                 }
-                entry.strGenreString = generesStream.str();
 
-                if (channel)
-                    channel->epg.insert(channel->epg.end(), entry);
+                if (epgCache[cid] == NULL) {
+                    epgCache[cid] = new map<time_t, PVRIptvEpgEntry>();
+                }
+                (*epgCache[cid])[entry.startTime] = entry;
             }
         }
         yajl_tree_free(json);
@@ -824,7 +853,7 @@ int ZatData::GetRecordingLastPlayedPosition(const PVR_RECORDING &recording) {
 }
 
 void ZatData::GetRecordings(ADDON_HANDLE handle, bool future) {
-  string jsonString = HttpGet("http://zattoo.com/zapi/playlist");
+  string jsonString = HttpGet(zattooServer + "/zapi/playlist");
 
   yajl_val json = JsonParser::parse(jsonString);
   
@@ -840,6 +869,25 @@ void ZatData::GetRecordings(ADDON_HANDLE handle, bool future) {
 
   for ( int index = 0; index < recordings->u.array.len; ++index ) {
     yajl_val recording = recordings->u.array.values[index];
+    int programId = JsonParser::getInt(recording, 1, "program_id");
+    ostringstream urlStream;
+    urlStream << zattooServer + "/zapi/program/details?program_id=" << programId;
+    jsonString = HttpGet(urlStream.str());
+    yajl_val detailJson = JsonParser::parse(jsonString);
+
+    if (detailJson == NULL || !JsonParser::getBoolean(detailJson, 1, "success")){
+      yajl_tree_free(detailJson);
+      continue;
+    }
+
+    //genre
+    yajl_val genres = JsonParser::getArray(detailJson, 2, "program", "genres");
+    //Only get the first genre
+    int genre = 0;
+    if (genres->u.array.len > 0) {
+      string genreName = YAJL_GET_STRING(genres->u.array.values[0]);
+      genre = categories.Category(genreName);
+    }
 
     time_t startTime  = JsonParser::getTime(recording, 1, "start");
     if (future && startTime > current_time) {
@@ -858,10 +906,14 @@ void ZatData::GetRecordings(ADDON_HANDLE handle, bool future) {
       ZatChannel channel = channelsByCid[JsonParser::getString(recording, 1, "cid").c_str()];
       tag.iClientChannelUid = channel.iUniqueId;
       PVR->TransferTimerEntry(handle, &tag);
-
       if (updateThread != NULL) {
         updateThread->SetNextRecordingUpdate(startTime);
       }
+      if (genre) {
+        tag.iGenreSubType = genre&0x0F;
+        tag.iGenreType = genre&0xF0;
+      }
+
     } else if (!future && startTime <= current_time) {
       PVR_RECORDING tag;
       memset(&tag, 0, sizeof(PVR_RECORDING));
@@ -870,11 +922,20 @@ void ZatData::GetRecordings(ADDON_HANDLE handle, bool future) {
       PVR_STRCPY(tag.strRecordingId, to_string(JsonParser::getInt(recording, 1, "id")).c_str());
       PVR_STRCPY(tag.strTitle, JsonParser::getString(recording, 1, "title").c_str());
       PVR_STRCPY(tag.strEpisodeName, JsonParser::getString(recording, 1, "episode_title").c_str());
+      PVR_STRCPY(tag.strPlot, JsonParser::getString(detailJson, 2, "program", "description").c_str());
       PVR_STRCPY(tag.strIconPath, JsonParser::getString(recording, 1, "image_url").c_str());
+      ZatChannel channel = channelsByCid[JsonParser::getString(recording, 1, "cid").c_str()];
+      tag.iChannelUid = channel.iUniqueId;
+      PVR_STRCPY(tag.strChannelName, channel.name.c_str());
       time_t endTime  = JsonParser::getTime(recording, 1, "end");
       tag.recordingTime = startTime;
       tag.iDuration = endTime -  startTime;
       PVR_STRCPY(tag.strStreamURL, GetRecordingStreamUrl(tag.strRecordingId).c_str());
+
+      if (genre) {
+        tag.iGenreSubType = genre&0x0F;
+        tag.iGenreType = genre&0xF0;
+      }
 
       if (recordingsData.find(tag.strRecordingId) != recordingsData.end()) {
         ZatRecordingData* recData = recordingsData[tag.strRecordingId];
@@ -885,12 +946,13 @@ void ZatData::GetRecordings(ADDON_HANDLE handle, bool future) {
 
       PVR->TransferRecordingEntry(handle, &tag);
     }
+    yajl_tree_free(detailJson);
   }
   yajl_tree_free(json);
 }
 
 int ZatData::GetRecordingsAmount(bool future) {
-  string jsonString = HttpGet("http://zattoo.com/zapi/playlist");
+  string jsonString = HttpGet(zattooServer + "/zapi/playlist");
 
   time_t current_time;
   time(&current_time);
@@ -920,7 +982,7 @@ std::string ZatData::GetRecordingStreamUrl(string recordingId) {
     ostringstream dataStream;
     dataStream << "recording_id=" << recordingId <<"&stream_type=" << streamType;
 
-    string jsonString = HttpPost("http://zattoo.com/zapi/watch", dataStream.str());
+    string jsonString = HttpPost(zattooServer + "/zapi/watch", dataStream.str());
 
     yajl_val json = JsonParser::parse(jsonString);
     
@@ -939,7 +1001,7 @@ bool ZatData::Record(int programId) {
   ostringstream dataStream;
   dataStream << "program_id=" << programId;
 
-  string jsonString = HttpPost("http://zattoo.com/zapi/playlist/program", dataStream.str());
+  string jsonString = HttpPost(zattooServer + "/zapi/playlist/program", dataStream.str());
   yajl_val json = JsonParser::parse(jsonString);
   bool ret = json != NULL && JsonParser::getBoolean(json, 1, "success");
   yajl_tree_free(json);
@@ -950,7 +1012,7 @@ bool ZatData::DeleteRecording(string recordingId) {
   ostringstream dataStream;
   dataStream << "recording_id=" << recordingId <<"";
 
-  string jsonString = HttpPost("http://zattoo.com/zapi/playlist/remove", dataStream.str());
+  string jsonString = HttpPost(zattooServer + "/zapi/playlist/remove", dataStream.str());
 
   yajl_val json = JsonParser::parse(jsonString);
   bool ret = json != NULL && JsonParser::getBoolean(json, 1, "success");
@@ -958,3 +1020,29 @@ bool ZatData::DeleteRecording(string recordingId) {
   return ret;
 }
 
+bool ZatData::IsPlayable(const EPG_TAG &tag) {
+  if (!recallEnabled) {
+    return false;
+  }
+  time_t current_time;
+  time(&current_time);
+  return ((current_time - tag.endTime) < maxRecallSeconds) && (tag.startTime < current_time);
+}
+
+string ZatData::GetEpgTagUrl(const EPG_TAG &tag) {
+  ostringstream dataStream;
+  ZatChannel channel = channelsByNumber[tag.iChannelNumber];
+  char timeStart[sizeof "2011-10-08T07:07:09Z"];
+  strftime(timeStart, sizeof timeStart, "%FT%TZ", gmtime(&tag.startTime));
+  char timeEnd[sizeof "2011-10-08T07:07:09Z"];
+  strftime(timeEnd, sizeof timeEnd, "%FT%TZ", gmtime(&tag.endTime));
+
+  dataStream << "cid=" << channel.cid << "&start=" << timeStart << "&end=" << timeEnd << "&stream_type=" << streamType;
+
+  string jsonString = HttpPost(zattooServer + "/zapi/watch", dataStream.str());
+
+  yajl_val json = JsonParser::parse(jsonString);
+  string url = JsonParser::getString(json, 2, "stream", "url");
+  yajl_tree_free(json);
+  return url;
+}

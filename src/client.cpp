@@ -34,6 +34,7 @@ CHelper_libXBMC_pvr   *PVR  = NULL;
 std::string zatUsername    = "";
 std::string zatPassword    = "";
 bool      zatFavoritesOnly = false;
+bool      zatAlternativeEpgService = false;
 int         g_iStartNumber  = 1;
 bool        g_bTSOverride   = true;
 bool        g_bCacheM3U     = false;
@@ -83,6 +84,10 @@ void ADDON_ReadSettings(void) {
     {
         zatFavoritesOnly = boolBuffer;
     }
+    if (XBMC->GetSetting("alternativeepgservice", &boolBuffer))
+    {
+      zatAlternativeEpgService = boolBuffer;
+    }
     XBMC->Log(LOG_DEBUG, "End Readsettings");
 }
 
@@ -120,12 +125,12 @@ ADDON_STATUS ADDON_Create(void *hdl, void *props) {
     ADDON_ReadSettings();
     if (!zatUsername.empty() && !zatPassword.empty()) {
       XBMC->Log(LOG_DEBUG, "Create Zat");
-      zat = new ZatData(zatUsername, zatPassword, zatFavoritesOnly);
+      zat = new ZatData(zatUsername, zatPassword, zatFavoritesOnly, zatAlternativeEpgService);
       XBMC->Log(LOG_DEBUG, "Zat created");
       if (zat->Initialize() && zat->LoadChannels()) {
         m_CurStatus = ADDON_STATUS_OK;
       } else {
-        XBMC->QueueNotification(QUEUE_ERROR, "Zattoo login failed!");
+        XBMC->QueueNotification(QUEUE_ERROR,  XBMC->GetLocalizedString(37111));
       }
     }
 
@@ -175,7 +180,7 @@ ADDON_STATUS ADDON_SetSetting(const char *settingName, const void *settingValue)
       return ADDON_STATUS_NEED_RESTART;
     }
   }
-  return !zatUsername.empty() && !zatPassword.empty() ? ADDON_STATUS_OK : ADDON_STATUS_NEED_SETTINGS;
+  return ADDON_STATUS_OK;
 }
 
 void ADDON_Stop() {
@@ -442,6 +447,7 @@ PVR_ERROR DeleteTimer(const PVR_TIMER &timer, bool bForceDelete) {
     return PVR_ERROR_REJECTED;
   }
   PVR->TriggerTimerUpdate();
+  PVR->TriggerRecordingUpdate();
   return PVR_ERROR_NO_ERROR;
 }
 
@@ -462,7 +468,30 @@ PVR_ERROR GetTimerTypes(PVR_TIMER_TYPE types[], int *size) {
   return PVR_ERROR_NO_ERROR;
 }
 
+PVR_ERROR IsRecordable(const EPG_TAG& tag, bool* isRecordable) {
 
+  time_t current_time;
+  time(&current_time);
+
+  *isRecordable = true; //tag.endTime > current_time - 60 * 60 * 24 *7;
+  return PVR_ERROR_NO_ERROR;
+}
+
+bool IsPlayable(const EPG_TAG &tag) {
+  if (!zat) {
+    return false;
+  }
+  return zat->IsPlayable(tag);
+}
+
+int GetEpgTagUrl(const EPG_TAG &tag, char *url, int urlLen) {
+  if (!zat) {
+    return -1;
+  }
+  string strUrl = zat->GetEpgTagUrl(tag);
+  strncpy(url, strUrl.c_str(), urlLen);
+  return urlLen;
+}
 
 PVR_ERROR SetRecordingPlayCount(const PVR_RECORDING &recording, int count) {
   if (!zat) {
